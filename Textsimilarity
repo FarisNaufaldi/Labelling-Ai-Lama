@@ -1,0 +1,64 @@
+// src/lib/textSimilarity.ts
+
+export function normalizeText(s: string) {
+  return (s ?? "")
+    .normalize("NFC")
+    .replace(/[\u200B\u200C\u200D\uFEFF]/g, "") // zero-width + BOM
+    .replace(/\r\n/g, "\n") // CRLF -> LF
+    .replace(/[ \t]+/g, " ") // collapse spaces/tabs
+    .trim();
+}
+
+export function calcSimilarity(original: string, modified: string) {
+  const origNorm = normalizeText(original);
+  const modNorm = normalizeText(modified);
+
+  const origLower = origNorm.toLowerCase();
+  const modLower = modNorm.toLowerCase();
+
+  if (!origLower && !modLower) return 100;
+  if (origLower === modLower) return 100;
+
+  let matches = 0;
+  const minLength = Math.min(origLower.length, modLower.length);
+  for (let i = 0; i < minLength; i++) {
+    if (origLower[i] === modLower[i]) matches++;
+  }
+
+  const origWords = origNorm.split(/\s+/).filter(Boolean);
+  const modWords = modNorm.split(/\s+/).filter(Boolean);
+
+  let matchingWords = 0;
+  for (const w of origWords) {
+    if (modWords.includes(w)) matchingWords++;
+  }
+
+  const charSimilarity =
+    (matches / Math.max(origLower.length, modLower.length || 1)) * 100;
+  const wordSimilarity =
+    (matchingWords / Math.max(origWords.length, 1)) * 100;
+
+  return Math.max(charSimilarity, wordSimilarity);
+}
+
+export function getSimilarityLabel(
+  aiSuggestion: string | null,
+  value: string
+): { label: string; type: "ai" | "edited" | "user"; percent?: number } {
+  if (!aiSuggestion) return { label: "User Reply", type: "user" };
+
+  const origNorm = normalizeText(aiSuggestion);
+  const valNorm = normalizeText(value);
+
+  if (origNorm === valNorm) {
+    return { label: "AI Reply", type: "ai", percent: 100 };
+  }
+
+  const similarity = calcSimilarity(aiSuggestion, value);
+
+  if (similarity >= 30) {
+    return { label: "User Modified", type: "edited", percent: similarity };
+  }
+
+  return { label: "User Reply", type: "user", percent: similarity };
+}
