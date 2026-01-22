@@ -1,0 +1,568 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Username from "../Username";
+import { Send, Loader2 } from "lucide-react";
+import { formatRelativeTime } from "../../../lib/dateUtils";
+import type { Comment } from "../../../types/comments";
+import { CommentsTextarea } from "../../ui/CommetsTextarea";
+import { cn } from "../../../lib/utils";
+import { getSimilarityLabel } from "../../../lib/textSimilarity";
+import type { MessageSource } from "../../messaging/MessageSourceBadge";
+
+
+const ReplyArrowIcon = () => (
+  <svg
+    width="14"
+    height="14"
+    viewBox="0 0 16 16"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+  >
+    <path
+      d="M10 6.66724L13.3333 10.0006L10 13.3339"
+      stroke="currentColor"
+      strokeWidth="1.33333"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+    <path
+      d="M2.66681 2.66724V7.3339C2.66681 8.04115 2.94776 8.71942 3.44786 9.21952C3.94795 9.71962 4.62623 10.0006 5.33348 10.0006H13.3335"
+      stroke="currentColor"
+      strokeWidth="1.33333"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
+const StarIcon = () => (
+  <svg
+    width="15"
+    height="15"
+    viewBox="0 0 16 16"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+  >
+    <path
+      d="M7.59339 0.791379C7.76344 0.460412 8.23656 0.460412 8.40661 0.791379L10.6482 5.15412C10.6918 5.23904 10.761 5.30817 10.8459 5.35181L15.2086 7.59339C15.5396 7.76344 15.5396 8.23656 15.2086 8.40661L10.8459 10.6482C10.761 10.6918 10.6918 10.761 10.6482 10.8459L8.40661 15.2086C8.23656 15.5396 7.76344 15.5396 7.59339 15.2086L5.35181 10.8459C5.30817 10.761 5.23904 10.6918 5.15412 10.6482L0.791379 8.40661C0.460412 8.23656 0.460412 7.76344 0.791379 7.59339L5.15412 5.35181C5.23904 5.30817 5.30817 5.23904 5.35181 5.15412L7.59339 0.791379Z"
+      fill="currentColor"
+      fillOpacity="0.8"
+    />
+  </svg>
+);
+
+const FALLBACK_AVATAR =
+  "https://api.dicebear.com/7.x/adventurer/svg?seed=instagram";
+
+function getCommentAvatar(comment: Comment): string {
+  if (comment.isOutgoing) return FALLBACK_AVATAR;
+  return `https://api.dicebear.com/7.x/adventurer/svg?seed=${
+    comment.commenter.profilePictureUrl ?? "user"
+  }`;
+}
+
+function ReplyComposer({
+  aiSuggestion,
+  isSending,
+  isAnySending,
+  userEdited,
+  textareaRef,
+  replyText,
+  reply,
+  onSendReply,
+  onChangeReplyText,
+  onUserEdited,
+  className,
+}: {
+  aiSuggestion: string | null;
+  isSending: boolean;
+  isAnySending: boolean;
+  userEdited: boolean;
+  textareaRef: React.RefObject<HTMLTextAreaElement | null>;
+  replyText: string;
+  reply: Comment;
+  onSendReply: (
+    reply: Comment,
+    text: string,
+    userEditedReply: boolean,
+    onReset?: () => void
+  ) => void;
+  onChangeReplyText: (text: string) => void;
+  onUserEdited: (edited: boolean) => void;
+  className?: string;
+}) {
+  const mentionRegex = new RegExp(`^@${reply.commenter.username}\\s+`);
+  const textWithoutMention = replyText.replace(mentionRegex, "");
+
+  const similarity = useMemo(
+    () => getSimilarityLabel(aiSuggestion, textWithoutMention),
+    [aiSuggestion, textWithoutMention]
+  );
+
+  const showLabel = !!replyText.trim();
+  const sourceLabel = showLabel ? similarity.label : null;
+  const iconsActive = !!aiSuggestion || !!replyText.trim();
+
+  return (
+    <div
+      className={cn(
+        "relative w-full max-w-full",
+        "border border-black/5 rounded-full bg-white",
+        "px-[8px] py-[4px]",
+        className
+      )}
+    >
+      <div className="flex items-center gap-2">
+        <span
+          className={cn(
+            "flex items-center justify-center leading-none transition-colors flex-shrink-0",
+            iconsActive ? "text-black/60" : "text-black/40"
+          )}
+        >
+          <ReplyArrowIcon />
+        </span>
+
+        {aiSuggestion && (
+          <button
+            type="button"
+            tabIndex={-1}
+            onClick={() => {
+              const mentionPrefix = `@${reply.commenter.username} `;
+              onChangeReplyText(mentionPrefix + aiSuggestion);
+              onUserEdited(false);
+            }}
+            title="Restore AI suggestion"
+            className={cn(
+              "flex items-center justify-center leading-none flex-shrink-0 transition-colors",
+              iconsActive ? "text-black/60" : "text-black/40"
+            )}
+            style={{ background: "transparent", border: "none", padding: 0 }}
+          >
+            <StarIcon />
+          </button>
+        )}
+
+        <div className="flex-1 min-w-0">
+          <div
+            className={cn(
+              "grid min-w-0 items-center gap-2",
+              sourceLabel ? "grid-cols-[auto_1fr]" : "grid-cols-[0px_1fr]"
+            )}
+          >
+            {sourceLabel ? (
+              <span
+                className={cn(
+                  "inline-flex items-center rounded-full bg-black/[0.03]",
+                  "px-2 py-[2px]",
+                  "text-[12px] leading-[18px] font-normal text-black/60 whitespace-nowrap"
+                )}
+              >
+                {sourceLabel}
+              </span>
+            ) : (
+              <span />
+            )}
+
+            <CommentsTextarea
+              ref={textareaRef}
+              value={replyText}
+              onChange={(e) => {
+                onChangeReplyText(e.target.value);
+                onUserEdited(true);
+              }}
+              placeholder="Reply..."
+              spellCheck={false}
+              autoCorrect="off"
+              autoCapitalize="off"
+              className={cn(
+                "w-full border-none bg-transparent p-0",
+                "text-[14px] leading-[24px] resize-none"
+              )}
+              style={{ overflowWrap: "anywhere", wordBreak: "break-word" }}
+            />
+          </div>
+        </div>
+
+        <button
+          onClick={() => onSendReply(reply, replyText, userEdited)}
+          disabled={isAnySending || !replyText.trim()}
+          className="h-6 w-6 rounded-full bg-black/80 text-white flex items-center justify-center hover:bg-black/90 disabled:opacity-40 flex-shrink-0"
+        >
+          {isSending ? (
+            <Loader2 className="h-3 w-3 animate-spin" />
+          ) : (
+            <Send className="h-3 w-3" />
+          )}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+interface NestedReplyProps {
+  reply: Comment;
+  getReplySource: (reply: Comment) => MessageSource | null;
+  onSendReply: (
+    reply: Comment,
+    text: string,
+    userEditedReply: boolean,
+    onReset?: () => void
+  ) => void;
+  sendingStates: { [key: string]: boolean };
+  isAnySending: boolean;
+}
+
+function NestedReply({
+  reply,
+  getReplySource,
+  onSendReply,
+  sendingStates,
+  isAnySending,
+}: NestedReplyProps) {
+  const [replyText, setReplyText] = useState<string>("");
+  const [showReplyTextarea, setShowReplyTextarea] = useState<boolean>(false);
+  const [userEdited, setUserEdited] = useState<boolean>(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    const mentionPrefix = `@${reply.commenter.username} `;
+    setReplyText(
+      reply.aiSuggestion ? mentionPrefix + reply.aiSuggestion : mentionPrefix
+    );
+    setUserEdited(false);
+    setShowReplyTextarea(false);
+  }, [reply.id, reply.aiSuggestion, reply.commenter.username]);
+
+  const replySource = getReplySource(reply);
+
+  // label is only for sent replies (from localStorage)
+  let label: string | null = null;
+  if (replySource === "ai") label = "AI Reply";
+  else if (replySource === "edited") label = "User Modified";
+
+  const handleReplyClick = () => {
+    if (showReplyTextarea) {
+      setShowReplyTextarea(false);
+      return;
+    }
+    setShowReplyTextarea(true);
+    const mentionPrefix = `@${reply.commenter.username} `;
+    const baseSuggestion = reply.aiSuggestion ?? "";
+    setReplyText(mentionPrefix + baseSuggestion);
+    setUserEdited(false);
+    textareaRef.current?.focus();
+  };
+
+  return (
+    <>
+      <div className="mt-1.5 flex items-start gap-2 group/nested">
+        <span className="text-gray-600 mt-1 flex-shrink-0">
+          <ReplyArrowIcon />
+        </span>
+
+        <div className="h-6 w-6 rounded-full overflow-hidden bg-gray-50 border border-gray-100 flex-shrink-0">
+          <img
+            src={reply.commenter.profilePictureUrl ?? getCommentAvatar(reply)}
+            alt="User avatar"
+          />
+        </div>
+
+        <div className="flex flex-col flex-1 min-w-0">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-baseline gap-2 min-w-0 flex-wrap">
+              {label && (
+                <span className="inline-flex items-center rounded-full bg-black/[0.03] px-2 py-[2px] text-[12px] leading-[18px] text-black/60 whitespace-nowrap">
+                  {label}
+                </span>
+              )}
+
+              {!label && (
+                <span className="flex-shrink-0">
+                  <Username value={reply.commenter.username} />
+                </span>
+              )}
+
+              <span className="text-sm text-gray-500 leading-snug min-w-0 break-words [overflow-wrap:anywhere] select-text selectable-text [caret-color:transparent]">
+                {reply.content}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-3 flex-shrink-0">
+              <button
+                onClick={handleReplyClick}
+                className="text-[11px] font-semibold text-gray-900 opacity-0 group-hover/nested:opacity-100 transition-opacity underline underline-offset-2"
+              >
+                Reply
+              </button>
+              <span className="text-[11px] text-gray-400 whitespace-nowrap">
+                {reply.createdAt
+                  ? formatRelativeTime(new Date(reply.createdAt))
+                  : ""}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {(showReplyTextarea || reply.aiSuggestion) && (
+        <div className="ml-12 mt-1">
+          <ReplyComposer
+            textareaRef={textareaRef}
+            userEdited={userEdited}
+            reply={reply}
+            isSending={sendingStates[reply.id] || false}
+            aiSuggestion={reply.aiSuggestion ?? null}
+            replyText={replyText}
+            onSendReply={(replyArg, text, userEditedInner) =>
+              onSendReply(replyArg, text, userEditedInner, () => {
+                setReplyText("");
+                setUserEdited(false);
+                setShowReplyTextarea(false);
+              })
+            }
+            onChangeReplyText={(v) => setReplyText(v)}
+            onUserEdited={(v) => setUserEdited(v)}
+            className="w-full"
+            isAnySending={isAnySending}
+          />
+        </div>
+      )}
+
+      {reply.replies?.map((r) => (
+        <NestedReply
+          key={r.id}
+          reply={r}
+          getReplySource={getReplySource}
+          onSendReply={onSendReply}
+          sendingStates={sendingStates}
+          isAnySending={isAnySending}
+        />
+      ))}
+    </>
+  );
+}
+
+interface CommentThreadCardProps {
+  comment: Comment;
+  onAcceptSuggestion?: (payload: {
+    commentExternalId: string;
+    reply: string;
+    replyMatchingSuggestionPercent: number | null;
+  }) => Promise<void>;
+  forceExpandReplies?: boolean;
+  onCommentsDelta?: (mediaId: string, delta: number) => void;
+}
+
+export function CommentThreadCard({
+  comment,
+  onAcceptSuggestion,
+  forceExpandReplies = false,
+  onCommentsDelta,
+}: CommentThreadCardProps) {
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const [replyText, setReplyText] = useState(comment.aiSuggestion ?? "");
+  const [userEdited, setUserEdited] = useState(false);
+  const [showAllReplies, setShowAllReplies] = useState(false);
+  const [showReplyTextarea, setShowReplyTextarea] = useState(false);
+  const [sendingStates, setSendingStates] = useState<{ [key: string]: boolean }>(
+    {}
+  );
+
+  const isAnySending = useMemo(
+    () => Object.values(sendingStates).some(Boolean),
+    [sendingStates]
+  );
+
+  useEffect(() => {
+    const mentionPrefix = `@${comment.commenter.username} `;
+    setReplyText(
+      comment.aiSuggestion ? mentionPrefix + comment.aiSuggestion : mentionPrefix
+    );
+    setUserEdited(false);
+    setShowReplyTextarea(false);
+  }, [comment.id, comment.aiSuggestion, comment.commenter.username]);
+
+  const displayedReplies =
+    forceExpandReplies || showAllReplies
+      ? comment.replies
+      : comment.replies?.slice(0, 2);
+
+  const handleReplyClick = () => {
+    if (showReplyTextarea) {
+      setShowReplyTextarea(false);
+      return;
+    }
+    setShowReplyTextarea(true);
+    const mentionPrefix = `@${comment.commenter.username} `;
+    const baseSuggestion = comment.aiSuggestion ?? "";
+    setReplyText(mentionPrefix + baseSuggestion);
+    setUserEdited(false);
+    textareaRef.current?.focus();
+  };
+
+  const handleSendReply = async (
+    targetComment: Comment,
+    textReply: string,
+    userEditedReply: boolean,
+    onReset?: () => void
+  ) => {
+    if (!textReply.trim() || !onAcceptSuggestion || !targetComment) return;
+
+    setSendingStates((prev) => ({ ...prev, [targetComment.id]: true }));
+
+    const text = textReply.trim();
+    const mentionRegex = new RegExp(`^@${targetComment.commenter.username}\\s+`);
+    const textWithoutMention = text.replace(mentionRegex, "");
+
+    const effectiveSuggestion = targetComment.aiSuggestion ?? null;
+
+    const { type: source, percent: matchingPercent } = getSimilarityLabel(
+      effectiveSuggestion,
+      textWithoutMention
+    );
+
+    if (!targetComment.externalId || typeof targetComment.externalId !== "string") {
+      console.error("Invalid commentExternalId:", targetComment.externalId);
+      setSendingStates((prev) => ({ ...prev, [targetComment.id]: false }));
+      return;
+    }
+
+    const payload = {
+      commentExternalId: targetComment.externalId!,
+      reply: text,
+      replyMatchingSuggestionPercent:
+        typeof matchingPercent === "number" ? matchingPercent : null,
+    };
+
+    try {
+      await onAcceptSuggestion(payload);
+
+      if (targetComment.mediaId) {
+        onCommentsDelta?.(targetComment.mediaId, 1);
+      }
+
+      if (onReset) onReset();
+      else {
+        setReplyText("");
+        setUserEdited(false);
+        setShowReplyTextarea(false);
+      }
+    } catch (error) {
+      console.error("Failed to send reply:", error);
+    } finally {
+      setSendingStates((prev) => ({ ...prev, [targetComment.id]: false }));
+    }
+
+    try {
+      localStorage.setItem(
+        `comment_source_${comment.id}_${text.substring(0, 50)}`,
+        JSON.stringify({ source })
+      );
+    } catch {}
+  };
+
+  const getReplySource = useCallback(
+    (reply: Comment): MessageSource | null => {
+      try {
+        const stored = localStorage.getItem(
+          `comment_source_${comment.id}_${reply.content.substring(0, 50)}`
+        );
+        return stored ? JSON.parse(stored).source : null;
+      } catch {
+        return null;
+      }
+    },
+    [comment.id]
+  );
+
+  return (
+    <div
+      ref={containerRef}
+      className={cn(
+        "bg-white",
+        forceExpandReplies
+          ? "px-2 py-3 border-none rounded-none"
+          : "px-2 py-3 border rounded-xl"
+      )}
+    >
+      <div className="flex items-start gap-3">
+        <div className="h-10 w-10 rounded-full bg-gray-100 flex-shrink-0 overflow-hidden border border-gray-100">
+          <img
+            src={comment.commenter.profilePictureUrl ?? getCommentAvatar(comment)}
+            alt="User avatar"
+          />
+        </div>
+
+        <div className="flex-1">
+          <div className="group/main flex-1 min-w-0">
+            <div className="flex justify-between items-start mb-1">
+              <div className="flex gap-2 items-baseline min-w-0">
+                <Username value={comment.commenter.username} />
+                <span className="text-sm text-gray-500 leading-snug min-w-0 break-words [overflow-wrap:anywhere] select-text selectable-text [caret-color:transparent]">
+                  {comment.content}
+                </span>
+              </div>
+
+              <div className="flex items-center gap-4 flex-shrink-0">
+                <button
+                  onClick={handleReplyClick}
+                  className="text-[11px] font-bold text-gray-900 opacity-0 group-hover/main:opacity-100 transition-opacity underline underline-offset-2"
+                >
+                  Reply
+                </button>
+                <span className="text-[11px] text-gray-400 whitespace-nowrap">
+                  {comment.createdAt
+                    ? formatRelativeTime(new Date(comment.createdAt))
+                    : ""}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex-1 min-w-0">
+            {(showReplyTextarea || comment.aiSuggestion) && (
+              <ReplyComposer
+                aiSuggestion={comment.aiSuggestion ?? null}
+                isSending={sendingStates[comment.id] || false}
+                isAnySending={isAnySending}
+                userEdited={userEdited}
+                textareaRef={textareaRef}
+                replyText={replyText}
+                reply={comment}
+                onSendReply={handleSendReply}
+                onChangeReplyText={setReplyText}
+                onUserEdited={setUserEdited}
+              />
+            )}
+          </div>
+
+          <div>
+            {displayedReplies?.map((reply) => (
+              <NestedReply
+                key={reply.id}
+                reply={reply}
+                getReplySource={getReplySource}
+                onSendReply={handleSendReply}
+                sendingStates={sendingStates}
+                isAnySending={isAnySending}
+              />
+            ))}
+
+            {comment.replies &&
+              comment.replies.length > 2 &&
+              !forceExpandReplies &&
+              !showReplyTextarea && (
+                <button
+                  onClick={() => setShowAllReplies((v) => !v)}
+                  className="ml-8 mt-2 text-xs font-bold text-gray-900 hover:text-black underline underline-offset-4 decoration-gray-900"
+                >
+                  {showAllReplies ? "Hide replies" : "View all replies"}
+                </button>
+              )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
