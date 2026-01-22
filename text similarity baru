@@ -1,0 +1,65 @@
+// src/lib/textSimilarity.ts
+
+export function normalizeText(s: string) {
+  return (s ?? "")
+    .normalize("NFC")
+    .replace(/[\u200B\u200C\u200D\uFEFF]/g, "")
+    .replace(/\r\n/g, "\n")
+    .replace(/[ \t]+/g, " ")
+    .trim();
+}
+
+function tokenize(s: string): string[] {
+  const cleaned = normalizeText(s)
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}@#'’]+/gu, " ")
+    .trim();
+
+  return cleaned ? cleaned.split(/\s+/).filter(Boolean) : [];
+}
+
+function setIntersectionSize(a: Set<string>, b: Set<string>): number {
+  let count = 0;
+  const [small, big] = a.size <= b.size ? [a, b] : [b, a];
+  for (const v of small) if (big.has(v)) count++;
+  return count;
+}
+
+function jaccard(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 && b.size === 0) return 1;
+  const inter = setIntersectionSize(a, b);
+  const union = a.size + b.size - inter;
+  return union === 0 ? 0 : inter / union;
+}
+
+function charNgrams(s: string, n = 3): Set<string> {
+  const t = normalizeText(s).toLowerCase();
+  if (!t) return new Set();
+  const compact = t.replace(/\s+/g, " ").trim();
+  if (compact.length < n) return new Set([compact]);
+
+  const grams = new Set<string>();
+  for (let i = 0; i <= compact.length - n; i++) {
+    grams.add(compact.slice(i, i + n));
+  }
+  return grams;
+}
+
+export function calcSimilarity(original: string, modified: string) {
+  const origNorm = normalizeText(original);
+  const modNorm = normalizeText(modified);
+
+  if (!origNorm && !modNorm) return 100;
+  if (origNorm.toLowerCase() === modNorm.toLowerCase()) return 100;
+
+  const origTokens = new Set(tokenize(origNorm));
+  const modTokens = new Set(tokenize(modNorm));
+  const tokenSim = jaccard(origTokens, modTokens); // 0..1
+
+  const origGrams = charNgrams(origNorm, 3);
+  const modGrams = charNgrams(modNorm, 3);
+  const gramSim = jaccard(origGrams, modGrams); // 0..1
+
+  const combined = 0.65 * tokenSim + 0.35 * gramSim;
+  return Math.round(combined * 100);
+}
